@@ -1,0 +1,3 @@
+*.o
+*.a
+test-client test-server-file test-server-mmap
