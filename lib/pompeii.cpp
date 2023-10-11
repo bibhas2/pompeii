@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/time.h>
+#include <netdb.h>
 #include <errno.h>
 #include <fcntl.h>
 
@@ -279,7 +280,7 @@ void Server::disconnect_client(Client &cli_state) {
     remove_client_fd(cli_state.fd);
 }
 
-void dispatch_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_set) {
+void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_set) {
     //Make sense out of the event
     if (FD_ISSET(state.server_socket, &read_fd_set)) {
         _trace("Client is connecting...");
@@ -392,7 +393,7 @@ void EventLoop::start() {
         
         for (auto& s : server_state) {
             if (s.in_use()) {
-                dispatch_event(s, readFdSet, writeFdSet);
+                dispatch_server_event(s, readFdSet, writeFdSet);
             }
         }
     }
@@ -486,6 +487,200 @@ void EventLoop::add_server(Server &state) {
 
 void EventLoop::end() {
     continue_loop = 0;
+}
+
+int client_make_connection(Client &cstate, const char *host, int port) {
+	_trace("Connecting to %s:%d", host, port);
+
+	char port_str[128];
+
+	snprintf(port_str, sizeof(port_str), "%d", port);
+
+	struct addrinfo hints, *res;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	int status = getaddrinfo(host, port_str, &hints, &res);
+
+	if (status < 0 || res == NULL) {
+		_trace("Failed to resolve address: %s", host);
+		
+        return -1;
+	}
+
+	int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+    if (sock < 0) {
+        _trace("Failed to open socket.");
+        
+        freeaddrinfo(res);
+
+        return -1;
+    }
+
+    //Make the socket non-blocking
+	status = fcntl(sock, F_SETFL, O_NONBLOCK);
+
+    if (status < 0) {
+        _trace("Failed to set non blocking mode for socket.");
+
+        freeaddrinfo(res);
+
+        return -1;
+    }
+
+	status = connect(sock, res->ai_addr, res->ai_addrlen);
+
+    //Don't need this any more
+	freeaddrinfo(res);
+
+	if (status < 0 && errno != EINPROGRESS) {
+		perror("Failed to connect to port.");
+
+		close(sock);
+
+		return -1;
+	}
+
+	cstate.fd = sock;
+
+	return cstate.fd;
+}
+
+int handle_server_read(Client cli_state) {
+    if (!(cli_state.read_write_flag & RW_STATE_WRITE)) {
+            _trace("Socket is not trying to write.");
+            return -1;
+    }
+    if (cli_state.write_buffer == NULL) {
+            _trace("Write buffer not setup.");
+            return -1;
+    }
+    if (cli_state.write_length == cli_state.write_completed) {
+            _trace("Write was already completed.");
+            return -1;
+    }
+
+    char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
+    int bytes_written = write(cli_state.fd,
+            buffer_start,
+            cli_state.write_length - cli_state.write_completed);
+    
+    _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
+    
+    if (bytes_written < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    return -1;
+            }
+
+            //Write will block. Not an error.
+            _trace("Write block detected.");
+
+            return 0;
+    }
+
+    if (bytes_written == 0) {
+            //Client has disconnected. We convert that to an error.
+            return -1;
+    }
+
+    cli_state.write_completed += bytes_written;
+
+    if (cli_state.handler) {
+        cli_state.handler->on_write(cli_state, buffer_start, bytes_written);
+    }
+
+    if (cli_state.write_completed == cli_state.write_length) {
+        //Write is completed. Cancel further write.
+        cli_state.cancel_write();
+
+        if (cli_state.handler) {
+            cli_state.handler->on_write_completed(cli_state);
+        }
+    }
+
+    return bytes_written;
+}
+
+int handle_server_write(Client &cli_state) {
+    if (!(cli_state.read_write_flag & RW_STATE_READ)) {
+        //Socket is not trying to read. Possibly a
+		//server disconnect signal.
+		char ch;
+
+		int bytesRead = read(cli_state.fd,
+			&ch, sizeof(char));
+
+		if (bytesRead == 0) {
+			_trace("Orderly disconnect detected.");
+		} else {
+			_trace("Unexpected out of band incoming data.");
+			
+            return -1;
+		}
+    }
+
+	//Make sure read buffer is setup
+    assert(cli_state.read_buffer != NULL);
+
+	//Make sure read is pending
+    assert(cli_state.read_length > cli_state.read_completed);
+
+    char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
+    int bytes_read = read(cli_state.fd,
+            buffer_start,
+            cli_state.read_length - cli_state.read_completed);
+
+    _trace("Read %d of %d bytes", bytes_read, cli_state.read_length);
+
+    if (bytes_read < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                return -1;
+        }
+
+        //Read will block. Not an error.
+        return 0;
+    }
+
+    if (bytes_read == 0) {
+        //Client has disconnected. We convert that to an error.
+        return -1;
+    }
+
+    cli_state.read_completed += bytes_read;
+	
+	bool read_finished = cli_state.read_completed == cli_state.read_length;
+
+    if (cli_state.handler) {
+            cli_state.handler->on_read(cli_state, buffer_start, bytes_read);
+    }
+
+    if (read_finished) {
+        //Read is completed. Cancel further read.
+		cli_state.cancel_read();
+
+        if (cli_state.handler) {
+            cli_state.handler->on_read_completed(cli_state);
+        }
+	}
+
+	return bytes_read;
+}
+
+int EventLoop::add_client(const char *host, int port) {
+    //Find a free client slot
+    for (auto& c : client_state) {
+        if (!c.in_use()) {
+            c.reset();
+
+            return client_make_connection(c, host, port);
+        }
+    }
+
+    //No more room
+    return -1;
 }
 
 }

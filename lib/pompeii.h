@@ -16,10 +16,10 @@ const uint32_t RW_STATE_WRITE = 4;
 struct ClientEventHandler {
     virtual void on_server_connect() {};
     virtual void on_server_disconnect() {};
-    virtual void on_read(Server&, Client&, char* buffer, int bytes_read) {};
-    virtual void on_write() {};
-    virtual void on_read_completed() {};
-    virtual void on_write_completed() {};
+    virtual void on_read(Client&, char* buffer, int bytes_read) {};
+    virtual void on_write(Client&, char* buffer, int bytes_read) {};
+    virtual void on_read_completed(Client&) {};
+    virtual void on_write_completed(Client&) {};
 };
 
 struct ServerEventHandler {
@@ -84,6 +84,8 @@ struct Server {
 
 struct EventLoop {
     Server server_state[MAX_SERVERS];
+    Client client_state[MAX_CLIENTS];
+
     bool continue_loop;
     int idle_timeout; //Timeout in seconds. -1 for no timeout.
 
@@ -91,6 +93,7 @@ struct EventLoop {
     void start();
     void end();
     void add_server(Server &state);
+    int add_client(const char *host, int port);
 };
 
 }
