@@ -14,12 +14,14 @@ const uint32_t RW_STATE_READ = 2;
 const uint32_t RW_STATE_WRITE = 4;
 
 struct ClientEventHandler {
-    virtual void on_server_connect() {};
-    virtual void on_server_disconnect() {};
+    virtual void on_server_connect(Client&) {};
+    virtual void on_server_connect_failed(Client&) {};
+    virtual void on_server_disconnect(Client&) {};
     virtual void on_read(Client&, char* buffer, int bytes_read) {};
     virtual void on_write(Client&, char* buffer, int bytes_read) {};
     virtual void on_read_completed(Client&) {};
     virtual void on_write_completed(Client&) {};
+    virtual void on_timeout(Client&) {};
 };
 
 struct ServerEventHandler {

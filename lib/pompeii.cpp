@@ -95,13 +95,13 @@ void populate_fd_set(EventLoop &loop, fd_set &read_fd_set, fd_set &write_fd_set)
     FD_ZERO(&read_fd_set);
     FD_ZERO(&write_fd_set);
     
-    for (auto& state : loop.server_state) {
-        if (state.in_use()) {
+    for (auto& server : loop.server_state) {
+        if (server.in_use()) {
             //Set the server socket
-            FD_SET(state.server_socket, &read_fd_set);
+            FD_SET(server.server_socket, &read_fd_set);
             
             //Set the clients
-            for (auto& c : state.client_state) {
+            for (auto& c : server.client_state) {
                 if (!c.in_use()) {
                     continue;
                 }
@@ -112,6 +112,28 @@ void populate_fd_set(EventLoop &loop, fd_set &read_fd_set, fd_set &write_fd_set)
                 if (c.read_write_flag & RW_STATE_WRITE) {
                     FD_SET(c.fd, &write_fd_set);
                 }
+            }
+        }
+    }
+
+    for (auto& client : loop.client_state) {
+        if (client.in_use()) {
+            /*
+            * We need to enable read select no matter what
+            * the value of read_write_flag is. This is 
+            * because an orderly disconnect by the server
+            * is signalled using a failed read and we need
+            * to know that.
+            */
+            FD_SET(client.fd, &read_fd_set);
+
+            /*
+            * Enable write select if writing is scheduled, or,
+            * an asynchronous connection is initiated but hasn't completed yet.
+            * A completed connection is indicated by a write event.
+            */
+            if ((client.read_write_flag & RW_STATE_WRITE) || (client.is_connected == false)) {
+                FD_SET(client.fd, &write_fd_set);
             }
         }
     }
@@ -284,20 +306,22 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
     //Make sense out of the event
     if (FD_ISSET(state.server_socket, &read_fd_set)) {
         _trace("Client is connecting...");
-        int clientFd = accept(state.server_socket, NULL, NULL);
+        int client_fd = accept(state.server_socket, NULL, NULL);
         
-        DIE(clientFd, "accept() failed.");
+        DIE(client_fd, "accept() failed.");
         
-        int added = state.add_client_fd(clientFd);
+        int added = state.add_client_fd(client_fd);
         
         if (!added) {
             _trace("Too many clients. Disconnecting...");
 
-            close(clientFd);
-            state.remove_client_fd(clientFd);
+            close(client_fd);
+            state.remove_client_fd(client_fd);
+
+            return;
         }
         
-        int status = fcntl(clientFd, F_SETFL, O_NONBLOCK);
+        int status = fcntl(client_fd, F_SETFL, O_NONBLOCK);
         DIE(status, "Failed to set non blocking mode for client socket.");
     } else {
         //Client wrote something or disconnected
@@ -348,6 +372,79 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
     }
 }
 
+void dispatch_client_event(Client &client, fd_set &read_fd_set, fd_set &write_fd_set) {
+    if (FD_ISSET(client.fd, &read_fd_set)) {
+        int status = handle_server_write(client);
+        
+        if (status < 1) {
+            close(client.fd);
+            client.fd = -1;
+
+            _trace("Orderly server disconnect.");
+
+            if (client.handler) {
+                client.handler->on_server_disconnect(client);
+            }
+
+            client.reset();
+
+            return;
+        }
+    }
+
+    if (FD_ISSET(client.fd, &write_fd_set)) {
+        if (client.is_connected == false) {
+            //Connection is complete. See if it worked
+            int valopt; 
+            socklen_t lon = sizeof(int); 
+
+            if (getsockopt(client.fd, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon) < 0) { 
+                perror("Error in getsockopt()");
+
+                return;
+            }
+
+            //Check the value of valopt
+            if (valopt) {
+                //Connection failed
+                _trace("Error connecting to server: %s.\n", strerror(valopt));
+                
+                close(client.fd);
+                client.fd = -1;
+
+                if (client.handler) {
+                    client.handler->on_server_connect_failed(client);
+                }
+
+                client.reset();
+            } else {
+                //Connection was successful
+                client.is_connected = true;
+                _trace("Asynchronous connection completed.");
+
+                if (client.handler) {
+                    client.handler->on_server_connect(client);
+                }
+            }
+        } else {
+            int status = handle_server_read(client);
+
+            if (status < 1) {
+                _trace("Unexpected server disconnect.");
+                
+                close(client.fd);
+                client.fd = -1;
+
+                if (client.handler) {
+                    client.handler->on_server_disconnect(client);
+                }
+
+                client.reset();
+            }
+        }
+    }    
+}
+
 void EventLoop::start() {
     continue_loop = true;
     
@@ -357,34 +454,40 @@ void EventLoop::start() {
         }
     }
     
-    fd_set readFdSet, writeFdSet;
+    fd_set read_fd_set, write_fd_set;
     struct timeval timeout;
     
     while (continue_loop) {
-        populate_fd_set(*this, readFdSet, writeFdSet);
+        populate_fd_set(*this, read_fd_set, write_fd_set);
                 
         timeout.tv_sec = idle_timeout;
         timeout.tv_usec = 0;
         
-        int numEvents = select(
+        int num_events = select(
                                FD_SETSIZE,
-                               &readFdSet,
-                               &writeFdSet,
+                               &read_fd_set,
+                               &write_fd_set,
                                NULL,
                                idle_timeout > 0 ? &timeout : NULL);
         
-        if (numEvents < 0 && errno == EINTR) {
+        if (num_events < 0 && errno == EINTR) {
             //A signal was handled
             continue;
         }
 
-        DIE(numEvents, "select() failed.");
+        DIE(num_events, "select() failed.");
         
-        if (numEvents == 0) {
+        if (num_events == 0) {
             _trace("select() timed out.");
             for (auto& s : server_state) {                
                 if (s.in_use() && s.handler) {
                     s.handler->on_timeout(s);
+                }
+            }
+
+            for (auto& c : client_state) {
+                if (c.in_use() && c.handler) {
+                    c.handler->on_timeout(c);
                 }
             }
             
@@ -393,7 +496,13 @@ void EventLoop::start() {
         
         for (auto& s : server_state) {
             if (s.in_use()) {
-                dispatch_server_event(s, readFdSet, writeFdSet);
+                dispatch_server_event(s, read_fd_set, write_fd_set);
+            }
+        }
+
+        for (auto& c : client_state) {
+            if (c.in_use()) {
+                dispatch_client_event(c, read_fd_set, write_fd_set);
             }
         }
     }
@@ -610,16 +719,16 @@ int handle_server_write(Client &cli_state) {
 		//server disconnect signal.
 		char ch;
 
-		int bytesRead = read(cli_state.fd,
+		int bytes_read = read(cli_state.fd,
 			&ch, sizeof(char));
 
-		if (bytesRead == 0) {
+		if (bytes_read == 0) {
 			_trace("Orderly disconnect detected.");
 		} else {
-			_trace("Unexpected out of band incoming data.");
-			
-            return -1;
+			_trace("Unexpected out of band incoming data.");			
 		}
+
+        return -1;
     }
 
 	//Make sure read buffer is setup
