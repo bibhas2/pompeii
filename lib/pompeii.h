@@ -78,8 +78,7 @@ struct Server {
     void disconnect_client(Client &c);
     bool add_client_fd(int fd);
     bool remove_client_fd(int fd);
-    int handle_client_write(Client &cli_state);
-    int handle_client_read(Client &cli_state);
+
     void start();
 };
 

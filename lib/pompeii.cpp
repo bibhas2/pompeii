@@ -156,7 +156,7 @@ bool Server::remove_client_fd(int fd) {
     return false;
 }
 
-int Server::handle_client_write(Client &cli_state) {
+int handle_client_write(Server& server, Client &cli_state) {
     if (!(cli_state.read_write_flag & RW_STATE_READ)) {
         _trace("Socket is not trying to read.");
         
@@ -199,22 +199,22 @@ int Server::handle_client_write(Client &cli_state) {
     
     cli_state.read_completed += bytes_read;
     
-    if (handler) {
-        handler->on_read(*this, cli_state, buffer_start, bytes_read);
+    if (server.handler) {
+        server.handler->on_read(server, cli_state, buffer_start, bytes_read);
     }
 
     if (cli_state.read_completed == cli_state.read_length) {
         cli_state.read_write_flag = cli_state.read_write_flag & (~RW_STATE_READ);
         
-        if (handler) {
-            handler->on_read_completed(*this, cli_state);
+        if (server.handler) {
+            server.handler->on_read_completed(server, cli_state);
         }
     }
     
     return bytes_read;
 }
 
-int Server::handle_client_read(Client &cli_state) {
+int handle_client_read(Server& server, Client &cli_state) {
     if (!(cli_state.read_write_flag & RW_STATE_WRITE)) {
         _trace("Socket is not trying to write.");
         
@@ -255,15 +255,15 @@ int Server::handle_client_read(Client &cli_state) {
     
     cli_state.write_completed += bytes_written;
     
-    if (handler) {
-        handler->on_write(*this, cli_state, buffer_start, bytes_written);
+    if (server.handler) {
+        server.handler->on_write(server, cli_state, buffer_start, bytes_written);
     }
     
     if (cli_state.write_completed == cli_state.write_length) {
         cli_state.read_write_flag &= ~RW_STATE_WRITE;
         
-        if (handler) {
-            handler->on_write_completed(*this, cli_state);
+        if (server.handler) {
+            server.handler->on_write_completed(server, cli_state);
         }
     }
     
@@ -308,7 +308,7 @@ void dispatch_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_set) {
             }
             
             if (FD_ISSET(c.fd, &read_fd_set)) {
-                int status = state.handle_client_write(c);
+                int status = handle_client_write(state, c);
 
                 if (status < 1) {
                     //Client has disconnected
@@ -329,7 +329,7 @@ void dispatch_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_set) {
             }
             
             if (FD_ISSET(c.fd, &write_fd_set)) {
-                int status = state.handle_client_read(c);
+                int status = handle_client_read(state, c);
 
                 if (status < 1) {
                     //Client disconnected
