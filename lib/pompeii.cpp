@@ -372,6 +372,127 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
     }
 }
 
+
+int handle_server_read(Client cli_state) {
+    if (!(cli_state.read_write_flag & RW_STATE_WRITE)) {
+            _trace("Socket is not trying to write.");
+            return -1;
+    }
+    if (cli_state.write_buffer == NULL) {
+            _trace("Write buffer not setup.");
+            return -1;
+    }
+    if (cli_state.write_length == cli_state.write_completed) {
+            _trace("Write was already completed.");
+            return -1;
+    }
+
+    char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
+    int bytes_written = write(cli_state.fd,
+            buffer_start,
+            cli_state.write_length - cli_state.write_completed);
+    
+    _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
+    
+    if (bytes_written < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    return -1;
+            }
+
+            //Write will block. Not an error.
+            _trace("Write block detected.");
+
+            return 0;
+    }
+
+    if (bytes_written == 0) {
+            //Client has disconnected. We convert that to an error.
+            return -1;
+    }
+
+    cli_state.write_completed += bytes_written;
+
+    if (cli_state.handler) {
+        cli_state.handler->on_write(cli_state, buffer_start, bytes_written);
+    }
+
+    if (cli_state.write_completed == cli_state.write_length) {
+        //Write is completed. Cancel further write.
+        cli_state.cancel_write();
+
+        if (cli_state.handler) {
+            cli_state.handler->on_write_completed(cli_state);
+        }
+    }
+
+    return bytes_written;
+}
+
+int handle_server_write(Client &cli_state) {
+    if (!(cli_state.read_write_flag & RW_STATE_READ)) {
+        //Socket is not trying to read. Possibly a
+		//server disconnect signal.
+		char ch;
+
+		int bytes_read = read(cli_state.fd,
+			&ch, sizeof(char));
+
+		if (bytes_read == 0) {
+			_trace("Orderly disconnect detected.");
+		} else {
+			_trace("Unexpected out of band incoming data.");			
+		}
+
+        return -1;
+    }
+
+	//Make sure read buffer is setup
+    assert(cli_state.read_buffer != NULL);
+
+	//Make sure read is pending
+    assert(cli_state.read_length > cli_state.read_completed);
+
+    char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
+    int bytes_read = read(cli_state.fd,
+            buffer_start,
+            cli_state.read_length - cli_state.read_completed);
+
+    _trace("Read %d of %d bytes", bytes_read, cli_state.read_length);
+
+    if (bytes_read < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                return -1;
+        }
+
+        //Read will block. Not an error.
+        return 0;
+    }
+
+    if (bytes_read == 0) {
+        //Client has disconnected. We convert that to an error.
+        return -1;
+    }
+
+    cli_state.read_completed += bytes_read;
+	
+	bool read_finished = cli_state.read_completed == cli_state.read_length;
+
+    if (cli_state.handler) {
+            cli_state.handler->on_read(cli_state, buffer_start, bytes_read);
+    }
+
+    if (read_finished) {
+        //Read is completed. Cancel further read.
+		cli_state.cancel_read();
+
+        if (cli_state.handler) {
+            cli_state.handler->on_read_completed(cli_state);
+        }
+	}
+
+	return bytes_read;
+}
+
 void dispatch_client_event(Client &client, fd_set &read_fd_set, fd_set &write_fd_set) {
     if (FD_ISSET(client.fd, &read_fd_set)) {
         int status = handle_server_write(client);
@@ -656,126 +777,6 @@ int client_make_connection(Client &cstate, const char *host, int port) {
 	cstate.fd = sock;
 
 	return cstate.fd;
-}
-
-int handle_server_read(Client cli_state) {
-    if (!(cli_state.read_write_flag & RW_STATE_WRITE)) {
-            _trace("Socket is not trying to write.");
-            return -1;
-    }
-    if (cli_state.write_buffer == NULL) {
-            _trace("Write buffer not setup.");
-            return -1;
-    }
-    if (cli_state.write_length == cli_state.write_completed) {
-            _trace("Write was already completed.");
-            return -1;
-    }
-
-    char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
-    int bytes_written = write(cli_state.fd,
-            buffer_start,
-            cli_state.write_length - cli_state.write_completed);
-    
-    _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
-    
-    if (bytes_written < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    return -1;
-            }
-
-            //Write will block. Not an error.
-            _trace("Write block detected.");
-
-            return 0;
-    }
-
-    if (bytes_written == 0) {
-            //Client has disconnected. We convert that to an error.
-            return -1;
-    }
-
-    cli_state.write_completed += bytes_written;
-
-    if (cli_state.handler) {
-        cli_state.handler->on_write(cli_state, buffer_start, bytes_written);
-    }
-
-    if (cli_state.write_completed == cli_state.write_length) {
-        //Write is completed. Cancel further write.
-        cli_state.cancel_write();
-
-        if (cli_state.handler) {
-            cli_state.handler->on_write_completed(cli_state);
-        }
-    }
-
-    return bytes_written;
-}
-
-int handle_server_write(Client &cli_state) {
-    if (!(cli_state.read_write_flag & RW_STATE_READ)) {
-        //Socket is not trying to read. Possibly a
-		//server disconnect signal.
-		char ch;
-
-		int bytes_read = read(cli_state.fd,
-			&ch, sizeof(char));
-
-		if (bytes_read == 0) {
-			_trace("Orderly disconnect detected.");
-		} else {
-			_trace("Unexpected out of band incoming data.");			
-		}
-
-        return -1;
-    }
-
-	//Make sure read buffer is setup
-    assert(cli_state.read_buffer != NULL);
-
-	//Make sure read is pending
-    assert(cli_state.read_length > cli_state.read_completed);
-
-    char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
-    int bytes_read = read(cli_state.fd,
-            buffer_start,
-            cli_state.read_length - cli_state.read_completed);
-
-    _trace("Read %d of %d bytes", bytes_read, cli_state.read_length);
-
-    if (bytes_read < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                return -1;
-        }
-
-        //Read will block. Not an error.
-        return 0;
-    }
-
-    if (bytes_read == 0) {
-        //Client has disconnected. We convert that to an error.
-        return -1;
-    }
-
-    cli_state.read_completed += bytes_read;
-	
-	bool read_finished = cli_state.read_completed == cli_state.read_length;
-
-    if (cli_state.handler) {
-            cli_state.handler->on_read(cli_state, buffer_start, bytes_read);
-    }
-
-    if (read_finished) {
-        //Read is completed. Cancel further read.
-		cli_state.cancel_read();
-
-        if (cli_state.handler) {
-            cli_state.handler->on_read_completed(cli_state);
-        }
-	}
-
-	return bytes_read;
 }
 
 int EventLoop::add_client(const char *host, int port) {
