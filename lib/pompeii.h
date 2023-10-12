@@ -96,4 +96,6 @@ struct EventLoop {
     int add_client(const char *host, int port, std::shared_ptr<ClientEventHandler> handler);
 };
 
+void enable_trace(int flag);
+
 }

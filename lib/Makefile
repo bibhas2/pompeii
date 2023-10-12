@@ -9,6 +9,7 @@ all: libpompeii.a
 	$(CC) $(CFLAGS) -c -o $@ $<
 libpompeii.a: $(OBJS) 
 	ar rcs libpompeii.a $(OBJS)
+	@make -C ../test clean
 clean:
 	rm $(OBJS)
 	rm libpompeii.a

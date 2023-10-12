@@ -638,6 +638,8 @@ void EventLoop::start() {
 }
 
 void Server::start(int port) {
+    _trace("Starting server at port: %d", port);
+
     int status;
     
     int sock = socket(PF_INET, SOCK_STREAM, 0);
@@ -717,6 +719,8 @@ void EventLoop::add_server(int port, std::shared_ptr<ServerEventHandler> handler
             s.handler = handler;
 
             s.start(port);
+
+            return;
         }
     }
 }
