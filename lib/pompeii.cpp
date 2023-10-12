@@ -61,14 +61,7 @@ Server::Server() {
     reset();
 }
 
-Server::Server(int port) {
-    reset();
-
-    this->port = port;
-}
-
 void Server::reset() {
-    port = -1;
     server_socket = -1;
 
     for (auto& c : client_state) {
@@ -88,6 +81,10 @@ EventLoop::EventLoop() {
 
     for (auto& s : server_state) {
         s.reset();
+    }
+
+    for (auto& c : client_state) {
+        c.reset();
     }
 }
 
@@ -337,19 +334,22 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
 
                 if (status < 1) {
                     //Client has disconnected
-                    _trace("Client is finished. Status: %d", status);
+                    _trace("Client has disconnected. Status: %d", status);
+
+                    close(c.fd);
+                    c.fd = -1;
 
                     if (state.handler) {
                         state.handler->on_client_disconnect(state, c);
                     }
 
-                    close(c.fd);
                     state.remove_client_fd(c.fd);
                 }
             }
             
             if (c.fd < 0) {
-                //Client write event caused application to disconnect.
+                //Client has been disconnected.
+                //No need to proceed to read from the client.
                 continue;
             }
             
@@ -358,20 +358,21 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
 
                 if (status < 1) {
                     //Client disconnected
-                    _trace("Client is finished. Status: %d", status);
+                    _trace("Client has disconnected. Status: %d", status);
+
+                    close(c.fd);
+                    c.fd = -1;
 
                     if (state.handler) {
                         state.handler->on_client_disconnect(state, c);
                     }
 
-                    close(c.fd);
                     state.remove_client_fd(c.fd);
                 }
             }
         }
     }
 }
-
 
 int handle_server_read(Client cli_state) {
     if (!(cli_state.read_write_flag & RW_STATE_WRITE)) {
@@ -395,19 +396,21 @@ int handle_server_read(Client cli_state) {
     _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
     
     if (bytes_written < 0) {
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    return -1;
-            }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                return -1;
+        }
 
-            //Write will block. Not an error.
-            _trace("Write block detected.");
+        //Write will block. Not an error.
+        _trace("Write block detected.");
 
-            return 0;
+        return 0;
     }
 
     if (bytes_written == 0) {
-            //Client has disconnected. We convert that to an error.
-            return -1;
+        //Server has disconnected in an unexpected manner. 
+        //This is different than an orderly disconnected by the server.
+        //We convert this event to an error.
+        return -1;
     }
 
     cli_state.write_completed += bytes_written;
@@ -461,7 +464,7 @@ int handle_server_write(Client &cli_state) {
 
     if (bytes_read < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                return -1;
+            return -1;
         }
 
         //Read will block. Not an error.
@@ -469,7 +472,7 @@ int handle_server_write(Client &cli_state) {
     }
 
     if (bytes_read == 0) {
-        //Client has disconnected. We convert that to an error.
+        //Server has disconnected unexpectedly. We convert that to an error.
         return -1;
     }
 
@@ -478,7 +481,7 @@ int handle_server_write(Client &cli_state) {
 	bool read_finished = cli_state.read_completed == cli_state.read_length;
 
     if (cli_state.handler) {
-            cli_state.handler->on_read(cli_state, buffer_start, bytes_read);
+        cli_state.handler->on_read(cli_state, buffer_start, bytes_read);
     }
 
     if (read_finished) {
@@ -513,9 +516,14 @@ void dispatch_client_event(Client &client, fd_set &read_fd_set, fd_set &write_fd
         }
     }
 
+    if (!client.in_use()) {
+        //No point going forward
+        return;
+    }
+
     if (FD_ISSET(client.fd, &write_fd_set)) {
         if (client.is_connected == false) {
-            //Connection is complete. See if it worked
+            //Connection is now complete. See if it was successful
             int valopt; 
             socklen_t lon = sizeof(int); 
 
@@ -629,7 +637,7 @@ void EventLoop::start() {
     }
 }
 
-void Server::start() {
+void Server::start(int port) {
     int status;
     
     int sock = socket(PF_INET, SOCK_STREAM, 0);
@@ -703,14 +711,12 @@ void Client::cancel_write() {
     _trace("Cancel write for socket: %d", fd);
 }
 
-void EventLoop::add_server(Server &state) {
-    assert(state.server_socket >= 0);
-    
+void EventLoop::add_server(int port, std::shared_ptr<ServerEventHandler> handler) {
     for (auto& s : server_state) {
         if (!s.in_use()) {
-            s = state; //Copy things
+            s.handler = handler;
 
-            state.reset();
+            s.start(port);
         }
     }
 }
@@ -779,11 +785,13 @@ int client_make_connection(Client &cstate, const char *host, int port) {
 	return cstate.fd;
 }
 
-int EventLoop::add_client(const char *host, int port) {
+int EventLoop::add_client(const char *host, int port, std::shared_ptr<ClientEventHandler> handler) {
     //Find a free client slot
     for (auto& c : client_state) {
         if (!c.in_use()) {
             c.reset();
+
+            c.handler = handler;
 
             return client_make_connection(c, host, port);
         }

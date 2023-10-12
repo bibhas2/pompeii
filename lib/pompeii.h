@@ -64,13 +64,11 @@ struct Client {
 };
 
 struct Server {
-	int port;
     int server_socket;
 	Client client_state[MAX_CLIENTS];
     std::shared_ptr<ServerEventHandler> handler;
 
     Server();
-    Server(int port);
     ~Server();
     void reset();
     bool in_use() {
@@ -81,7 +79,7 @@ struct Server {
     bool add_client_fd(int fd);
     bool remove_client_fd(int fd);
 
-    void start();
+    void start(int port);
 };
 
 struct EventLoop {
@@ -94,8 +92,8 @@ struct EventLoop {
     EventLoop();
     void start();
     void end();
-    void add_server(Server &state);
-    int add_client(const char *host, int port);
+    void add_server(int port, std::shared_ptr<ServerEventHandler> handler);
+    int add_client(const char *host, int port, std::shared_ptr<ClientEventHandler> handler);
 };
 
 }
