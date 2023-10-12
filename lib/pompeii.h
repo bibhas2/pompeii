@@ -17,8 +17,8 @@ struct ClientEventHandler {
     virtual void on_server_connect(Client&) {};
     virtual void on_server_connect_failed(Client&) {};
     virtual void on_server_disconnect(Client&) {};
-    virtual void on_read(Client&, char* buffer, int bytes_read) {};
-    virtual void on_write(Client&, char* buffer, int bytes_read) {};
+    virtual void on_read(Client&, const char* buffer, int bytes_read) {};
+    virtual void on_write(Client&, const char* buffer, int bytes_read) {};
     virtual void on_read_completed(Client&) {};
     virtual void on_write_completed(Client&) {};
     virtual void on_timeout(Client&) {};
@@ -30,18 +30,18 @@ struct ServerEventHandler {
     virtual void on_timeout(Server&) {};
     virtual void on_client_connect(Server&, Client&) {};
     virtual void on_client_disconnect(Server&, Client&) {};
-    virtual void on_read(Server&, Client&, char* buffer, int bytes_read) {};
-    virtual void on_write(Server&, Client&, char* buffer, int bytes_read) {};
+    virtual void on_read(Server&, Client&, const char* buffer, int bytes_read) {};
+    virtual void on_write(Server&, Client&, const char* buffer, int bytes_read) {};
     virtual void on_read_completed(Server&, Client&) {};
     virtual void on_write_completed(Server&, Client&) {};
 };
 
 struct Client {
 	int fd;
-	char *read_buffer;
+	const char *read_buffer;
     size_t read_length;
     size_t read_completed;
-    char *write_buffer;
+    const char *write_buffer;
     size_t write_length;
     size_t write_completed;
     char host[128];
@@ -57,8 +57,8 @@ struct Client {
         return fd >= 0;
     }
 
-    void schedule_read(char *buffer, size_t length);
-    void schedule_write(char *buffer, size_t length);
+    void schedule_read(const char *buffer, size_t length);
+    void schedule_write(const char *buffer, size_t length);
     void cancel_read();
     void cancel_write();
 };

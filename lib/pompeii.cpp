@@ -193,10 +193,10 @@ int handle_client_write(Server& server, Client &cli_state) {
         return -1;
     }
     
-    char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
+    const char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
 
     int bytes_read = read(cli_state.fd,
-                         buffer_start,
+                         (void*) buffer_start,
                          cli_state.read_length - cli_state.read_completed);
     
     _trace("Read %d of %d bytes", bytes_read, cli_state.read_length);
@@ -251,9 +251,9 @@ int handle_client_read(Server& server, Client &cli_state) {
         return -1;
     }
     
-    char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
+    const char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
     int bytes_written = write(cli_state.fd,
-                             buffer_start,
+                             (void*) buffer_start,
                              cli_state.write_length - cli_state.write_completed);
     
     _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
@@ -388,9 +388,9 @@ int handle_server_read(Client cli_state) {
             return -1;
     }
 
-    char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
+    const char *buffer_start = cli_state.write_buffer + cli_state.write_completed;
     int bytes_written = write(cli_state.fd,
-            buffer_start,
+            (void*) buffer_start,
             cli_state.write_length - cli_state.write_completed);
     
     _trace("Written %d of %d bytes", bytes_written, cli_state.write_length);
@@ -455,9 +455,9 @@ int handle_server_write(Client &cli_state) {
 	//Make sure read is pending
     assert(cli_state.read_length > cli_state.read_completed);
 
-    char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
+    const char *buffer_start = cli_state.read_buffer + cli_state.read_completed;
     int bytes_read = read(cli_state.fd,
-            buffer_start,
+            (void*) buffer_start,
             cli_state.read_length - cli_state.read_completed);
 
     _trace("Read %d of %d bytes", bytes_read, cli_state.read_length);
@@ -671,7 +671,7 @@ void Server::start(int port) {
     server_socket = sock;
 }
 
-void Client::schedule_read(char *buffer, size_t length) {
+void Client::schedule_read(const char *buffer, size_t length) {
     assert(fd >= 0); //Bad socket?
     assert((read_write_flag & RW_STATE_READ) == 0); //Already reading?
     
@@ -683,7 +683,7 @@ void Client::schedule_read(char *buffer, size_t length) {
     _trace("Scheduling read for socket: %d", fd);
 }
 
-void Client::schedule_write(char *buffer, size_t length) {
+void Client::schedule_write(const char *buffer, size_t length) {
     assert(fd >= 0); //Bad socket?
     assert((read_write_flag & RW_STATE_WRITE) == 0); //Already writing?
     
