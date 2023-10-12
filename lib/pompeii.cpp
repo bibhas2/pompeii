@@ -336,14 +336,14 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
                     //Client has disconnected
                     _trace("Client has disconnected. Status: %d", status);
 
-                    close(c.fd);
-                    c.fd = -1;
-
                     if (state.handler) {
                         state.handler->on_client_disconnect(state, c);
                     }
 
                     state.remove_client_fd(c.fd);
+
+                    close(c.fd);
+                    c.fd = -1;
                 }
             }
             
@@ -360,14 +360,14 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
                     //Client disconnected
                     _trace("Client has disconnected. Status: %d", status);
 
-                    close(c.fd);
-                    c.fd = -1;
-
                     if (state.handler) {
                         state.handler->on_client_disconnect(state, c);
                     }
 
                     state.remove_client_fd(c.fd);
+
+                    close(c.fd);
+                    c.fd = -1;
                 }
             }
         }
