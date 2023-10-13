@@ -61,6 +61,11 @@ struct Client {
     void schedule_write(const char *buffer, size_t length);
     void cancel_read();
     void cancel_write();
+    template <class H>
+    std::shared_ptr<H> get_handler() {
+        return std::dynamic_pointer_cast<H>(handler);
+    }
+
 };
 
 struct Server {
