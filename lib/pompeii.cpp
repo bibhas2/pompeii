@@ -317,7 +317,7 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
         
         DIE(client_fd, "accept() failed.");
         
-        int added = state.add_client_fd(client_fd);
+        bool added = state.add_client_fd(client_fd);
         
         if (!added) {
             _trace("Too many clients. Disconnecting...");
@@ -350,10 +350,9 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
                         state.handler->on_client_disconnect(state, c);
                     }
 
-                    state.remove_client_fd(c.fd);
-
+                    _trace("Closing client socket: %d", c.fd);
                     close(c.fd);
-                    c.fd = -1;
+                    state.remove_client_fd(c.fd);
                 }
             }
             
@@ -374,10 +373,9 @@ void dispatch_server_event(Server &state, fd_set &read_fd_set, fd_set &write_fd_
                         state.handler->on_client_disconnect(state, c);
                     }
 
-                    state.remove_client_fd(c.fd);
-
+                    _trace("Closing client socket: %d", c.fd);
                     close(c.fd);
-                    c.fd = -1;
+                    state.remove_client_fd(c.fd);
                 }
             }
         }
