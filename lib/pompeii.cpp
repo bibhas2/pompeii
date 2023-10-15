@@ -139,7 +139,7 @@ void populate_fd_set(EventLoop &loop, fd_set &read_fd_set, fd_set &write_fd_set)
 void Server::disconnect_clients() {
     for (auto& c : client_state) {
         if (c.in_use()) {
-            close(c.fd);
+            disconnect_client(c);
 
             c.reset();
         }
@@ -301,6 +301,8 @@ int handle_client_read(Server& server, Client &cli_state) {
 }
 
 void Server::disconnect_client(Client &cli_state) {
+    _trace("Disconnecting client: %d", cli_state.fd);
+    
     if (handler) {
         handler->on_client_disconnect(*this, cli_state);
     }
