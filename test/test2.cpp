@@ -2,15 +2,8 @@
 #include <string_view>
 #include <iostream>
 
-struct MyServer;
-
 struct MyClient : public pompeii::ClientEventHandler {
     char buff[256];
-    MyServer& server_state;
-
-    MyClient(MyServer& s) : server_state(s) {
-
-    }
 
     ~MyClient() {
         printf("MyClient getting cleaned up.\n");
@@ -44,7 +37,7 @@ struct MyServer : public pompeii::ServerEventHandler {
     void on_client_connect(pompeii::Server& s, pompeii::Client& c) {
         printf("Client connected. Socket: %d\n", c.fd);
 
-        auto mc = std::make_shared<MyClient>(*this);
+        auto mc = std::make_shared<MyClient>();
 
         c.handler = mc;
 
@@ -58,7 +51,9 @@ void MyClient::on_read(pompeii::Server& s, pompeii::Client& c, const char* buffe
         std::cout << cmd;
 
         if (cmd.starts_with("shutdown")) {
-            server_state.loop.end();
+            auto h = s.get_handler<MyServer>();
+            
+           h->loop.end();
         } else if (cmd.starts_with("stats")) {
             display_stats(s);
         }

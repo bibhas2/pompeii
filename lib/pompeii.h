@@ -69,7 +69,6 @@ struct Client {
     std::shared_ptr<H> get_handler() {
         return std::dynamic_pointer_cast<H>(handler);
     }
-
 };
 
 struct Server {
@@ -89,6 +88,10 @@ struct Server {
     bool remove_client_fd(int fd);
 
     void start(int port);
+    template <class H>
+    std::shared_ptr<H> get_handler() {
+        return std::dynamic_pointer_cast<H>(handler);
+    }
 };
 
 struct EventLoop {
