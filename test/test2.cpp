@@ -21,17 +21,24 @@ struct MyClient : public pompeii::ClientEventHandler {
 
         c.schedule_read(buff, sizeof(buff));
     }
-    void on_write_completed(pompeii::Client& c) {
-        
+
+    void display_stats(pompeii::Server& s) {
+        for (auto& c : s.client_state) {
+            if (c.in_use()) {
+                printf("Client: %d\n", c.fd);
+                printf("Reading: %s\n", (c.read_write_flag & pompeii::RW_STATE_READ) ? "Y" : "N");
+                printf("Writing: %s\n", (c.read_write_flag & pompeii::RW_STATE_WRITE) ? "Y" : "N");
+            }
+        }
     }
-    void on_read(pompeii::Client& c, const char* buffer, int bytes_read);
+
+    void on_read(pompeii::Server& s, pompeii::Client& c, const char* buffer, int bytes_read);
 };
 
 struct MyServer : public pompeii::ServerEventHandler {
     pompeii::EventLoop& loop;
 
     MyServer(pompeii::EventLoop& l) : loop(l) {
-
     }
 
     void on_client_connect(pompeii::Server& s, pompeii::Client& c) {
@@ -45,13 +52,15 @@ struct MyServer : public pompeii::ServerEventHandler {
     }
 };
 
-void MyClient::on_read(pompeii::Client& c, const char* buffer, int bytes_read) {
+void MyClient::on_read(pompeii::Server& s, pompeii::Client& c, const char* buffer, int bytes_read) {
         std::string_view cmd(buffer, bytes_read);
 
         std::cout << cmd;
 
         if (cmd.starts_with("shutdown")) {
             server_state.loop.end();
+        } else if (cmd.starts_with("stats")) {
+            display_stats(s);
         }
 
         c.cancel_read();

@@ -21,6 +21,10 @@ struct ClientEventHandler {
     virtual void on_write(Client&, const char* buffer, int bytes_read) {};
     virtual void on_read_completed(Client&) {};
     virtual void on_write_completed(Client&) {};
+    virtual void on_read(Server&, Client&, const char* buffer, int bytes_read) {};
+    virtual void on_write(Server&, Client&, const char* buffer, int bytes_read) {};
+    virtual void on_read_completed(Server&, Client&) {};
+    virtual void on_write_completed(Server&, Client&) {};
     virtual void on_timeout(Client&) {};
 };
 
