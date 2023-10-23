@@ -4,7 +4,7 @@
 
 struct MyClient : public pompeii::ClientEventHandler {
     int num_sent = 0;
-    char buff[256];
+    char read_buff[256];
 
     ~MyClient() {
         printf("MyClient getting cleaned up.\n");
@@ -20,7 +20,7 @@ struct MyClient : public pompeii::ClientEventHandler {
         if (num_sent < 10) {
             greet(c);
         } else {
-            c.schedule_read(buff, sizeof(buff));
+            c.schedule_read(read_buff, sizeof(read_buff));
         }
     }
     void on_read(pompeii::Client& c, const char* buffer, int bytes_read) {

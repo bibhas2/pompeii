@@ -1,27 +1,55 @@
 #include <pompeii.h>
 #include <string_view>
-#include <iostream>
+#include <sstream>
 
 struct MyClient : public pompeii::ClientEventHandler {
-    char buff[256];
+    char read_buff[256];
+    std::ostringstream out;
+    std::string write_buffer;
 
     ~MyClient() {
         printf("MyClient getting cleaned up.\n");
     }
     void prompt(pompeii::Client& c) {
-        auto prompt = "> ";
-        c.schedule_write(prompt, strlen(prompt));
+        c.cancel_write();
+        c.cancel_read();
 
-        c.schedule_read(buff, sizeof(buff));
+        out << "> ";
+        
+        send_output(c);
+
+        c.schedule_read(read_buff, sizeof(read_buff));
     }
 
-    void display_stats(pompeii::Server& s) {
+    void display_stats(pompeii::Server& s, pompeii::Client& c) {
+        printf("display_stats called\n");
         for (auto& c : s.client_state) {
             if (c.in_use()) {
-                printf("Client: %d\n", c.fd);
-                printf("Reading: %s\n", (c.read_write_flag & pompeii::RW_STATE_READ) ? "Y" : "N");
-                printf("Writing: %s\n", (c.read_write_flag & pompeii::RW_STATE_WRITE) ? "Y" : "N");
+                out << "Client: " << c.fd << "\n";
+                out << "Reading: " << ((c.read_write_flag & pompeii::RW_STATE_READ) ? "Y" : "N") << "\n";
+                out << "Writing: " << ((c.read_write_flag & pompeii::RW_STATE_WRITE) ? "Y" : "N") << "\n";
             }
+        }
+
+        send_output(c);
+    }
+
+    void send_output(pompeii::Client& c) {
+        c.cancel_write();
+
+        write_buffer = out.str();
+
+        out.clear();
+        out.str("");
+
+        c.schedule_write(write_buffer.data(), write_buffer.length());
+    }
+
+    void on_write_completed(pompeii::Server& s, pompeii::Client& c) {
+        if (!(c.read_write_flag & pompeii::RW_STATE_READ)) {
+            //Not already waiting to read
+
+            prompt(c);
         }
     }
 
@@ -48,19 +76,15 @@ struct MyServer : public pompeii::ServerEventHandler {
 void MyClient::on_read(pompeii::Server& s, pompeii::Client& c, const char* buffer, int bytes_read) {
         std::string_view cmd(buffer, bytes_read);
 
-        std::cout << cmd;
-
         if (cmd.starts_with("shutdown")) {
             auto h = s.get_handler<MyServer>();
             
            h->loop.end();
         } else if (cmd.starts_with("stats")) {
-            display_stats(s);
+            display_stats(s, c);
         }
 
         c.cancel_read();
-
-        prompt(c);
 }
 
 int main() {
